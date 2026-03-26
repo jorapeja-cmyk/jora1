@@ -1,0 +1,118 @@
+from datetime import date, datetime
+
+from telegram import Update
+from telegram.ext import ContextTypes
+
+from database import add_task, get_tasks_by_user
+
+
+HELP_TEXT = """
+Available commands:
+/start - Start the bot
+/help - Show this help message
+/add subject | task description | due date
+/tasks - Show your saved homework
+/list - Same as /tasks
+
+Examples:
+/add Math | Finish algebra exercises 1-10 | 2026-03-30
+/add Biology | Study cell division | 2026-03-28
+/tasks
+""".strip()
+
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Hello! I am your Homework Planner Bot.\n"
+        "Use /help to see the available commands."
+    )
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(HELP_TEXT)
+
+
+async def add_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text(
+            "Use this format:\n"
+            "/add subject | task description | due date\n\n"
+            "Example:\n"
+            "/add Math | Finish algebra exercises 1-10 | 2026-03-30"
+        )
+        return
+
+    command_text = " ".join(context.args)
+    parts = [part.strip() for part in command_text.split("|")]
+
+    if len(parts) != 3:
+        await update.message.reply_text(
+            "Invalid format.\n"
+            "Correct format: /add subject | task description | due date"
+        )
+        return
+
+    subject, task_text, due_date = parts
+
+    if not subject or not task_text or not due_date:
+        await update.message.reply_text(
+            "Subject, task description, and due date cannot be empty."
+        )
+        return
+
+    if not is_valid_date(due_date):
+        await update.message.reply_text(
+            "Due date must be in YYYY-MM-DD format.\n"
+            "Example: 2026-03-30"
+        )
+        return
+
+    status = "urgent" if is_urgent(due_date) else "pending"
+
+    add_task(
+        user_id=update.effective_user.id,
+        subject=subject,
+        task_text=task_text,
+        due_date=due_date,
+        status=status,
+    )
+
+    await update.message.reply_text(
+        f"Task saved successfully.\n"
+        f"Subject: {subject}\n"
+        f"Task: {task_text}\n"
+        f"Due date: {due_date}\n"
+        f"Status: {status}"
+    )
+
+
+async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tasks = get_tasks_by_user(update.effective_user.id)
+
+    if not tasks:
+        await update.message.reply_text("You do not have any saved homework yet.")
+        return
+
+    lines = ["Your homework tasks:"]
+
+    for task in tasks:
+        lines.append(
+            f"{task['id']}. {task['subject']} | {task['task_text']} | "
+            f"Due: {task['due_date']} | Status: {task['status']}"
+        )
+
+    await update.message.reply_text("\n".join(lines))
+
+
+def is_valid_date(date_text):
+    try:
+        datetime.strptime(date_text, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
+
+
+def is_urgent(due_date):
+    due = datetime.strptime(due_date, "%Y-%m-%d").date()
+    days_left = (due - date.today()).days
+    return days_left <= 2
